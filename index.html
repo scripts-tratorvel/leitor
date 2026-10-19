@@ -154,6 +154,7 @@ function telaLeitor(){
 }
 
 function abrirCamera(){
+  if(leitor) return;
   if(!window.Html5Qrcode){ aviso.textContent='⚠ Não foi possível carregar o leitor. Verifique a internet e recarregue a página.'; return; }
   aviso.textContent='Abrindo a câmera…';
   var fmts=[];
@@ -188,6 +189,7 @@ function lido(txt){
   if(txt===ultimo && agora-ultimoEm<8000) return;   // mesma etiqueta ainda na frente da câmera
   ultimo=txt; ultimoEm=agora;
   try{ if(navigator.vibrate) navigator.vibrate(80); }catch(e){}
+  pararCamera();          // fecha a câmera assim que lê
   buscar(txt);
 }
 
@@ -205,9 +207,17 @@ function buscar(txt){
   }).catch(function(e){ ocupado=false; mostrarErro('Sem conexão com o app: '+e.message); });
 }
 
+function botaoProxima(){
+  var b=el('button','btn','📷 Ler próxima etiqueta'); b.style.marginTop='12px';
+  b.onclick=function(){ resBox.innerHTML=''; window.scrollTo(0,0); abrirCamera(); };
+  return b;
+}
+
 function mostrarErro(msg){
   resBox.innerHTML='';
-  resBox.appendChild(el('div','card res erro','⚠ '+msg));
+  var c=el('div','card res erro','⚠ '+msg);
+  c.appendChild(el('br')); c.appendChild(botaoProxima());
+  resBox.appendChild(c);
   try{ if(navigator.vibrate) navigator.vibrate([60,60,60]); }catch(e){}
 }
 
@@ -235,6 +245,7 @@ function mostrar(r){
     c.appendChild(d);
   });
   if(r.obs) c.appendChild(el('div','obs','📝 '+r.obs));
+  c.appendChild(botaoProxima());
   resBox.appendChild(c);
 
   var resumo=itens.map(function(it){ return it.q+'x '+it.sku; }).join(', ');
