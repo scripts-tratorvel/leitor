@@ -73,6 +73,10 @@
     background:rgba(0,0,0,.6);padding:20px}
   #modal .caixa{background:var(--card);border-radius:14px;padding:20px;max-width:420px;width:100%;text-align:center;border:5px solid var(--erro)}
   #modal .caixa.info{border-color:var(--azul)}
+  #okTela{position:fixed;inset:0;z-index:40;display:none;align-items:center;justify-content:center;background:rgba(31,157,85,.92);color:#fff;padding:20px;text-align:center}
+  #okTela .big{font-size:64px;font-weight:900;line-height:1}
+  #okTela .sku{font-size:30px;margin-top:10px}
+  #okTela .desc{color:#eafff1;font-size:16px;margin-top:6px}
   #modal h2{margin:0 0 8px;font-size:22px}
   #modal p{margin:0 0 14px;font-size:16px;overflow-wrap:anywhere}
 </style>
@@ -84,6 +88,7 @@
 </header>
 <main id="main"></main>
 <div id="modal"><div class="caixa" id="modalCaixa"></div></div>
+<div id="okTela"></div>
 
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
@@ -350,17 +355,23 @@ function iniciarConferencia(r){
   pararCamera();
   var itens=(r.itens||[]).map(function(it){
     return { sku:String(it.sku||''), desc:it.desc||'', local:it.local||'', kit:it.kit||'',
-             q:Number(String(it.q).replace(',','.'))||1, lidos:0, eans:[] };
+             q:Number(String(it.q).replace(',','.'))||1, lidos:0, eans:(it.ean||[]).map(normEan), temEan:!!it.ean };
   });
-  resBox.innerHTML='';
-  resBox.appendChild(el('div','card res busca','⏳ Buscando os códigos de barras dos produtos…'));
-  var skus=itens.map(function(i){return i.sku;}).filter(function(v,i,a){return v && a.indexOf(v)===i;});
-  api({acao:'gtins', pin:PIN, skus:skus.join('|')}).then(function(res){
-    if(!res.ok){ mostrarErro(res.erro||'Erro ao buscar os códigos.'); return; }
-    itens.forEach(function(i){ i.eans=(res.r[i.sku]||[]).map(normEan); });
-    CONF={ r:r, itens:itens, erros:[], ultimo:'', ultimoEm:0 };
+  function comecar(){
+    CONF={ r:r, itens:itens, erros:[], visto:{}, pausa:0 };
     desenharConf();
     abrirCamera('leitorConf');
+  }
+  // Os códigos de barras normalmente já vêm junto com o pedido; só consulta os que faltam
+  var faltam=itens.filter(function(i){ return !i.temEan && i.sku; }).map(function(i){return i.sku;})
+    .filter(function(v,i,a){ return a.indexOf(v)===i; });
+  if(!faltam.length){ comecar(); return; }
+  resBox.innerHTML='';
+  resBox.appendChild(el('div','card res busca','⏳ Buscando os códigos de barras dos produtos…'));
+  api({acao:'gtins', pin:PIN, skus:faltam.join('|')}).then(function(res){
+    if(!res.ok){ mostrarErro(res.erro||'Erro ao buscar os códigos.'); return; }
+    itens.forEach(function(i){ if(!i.temEan) i.eans=(res.r[i.sku]||[]).map(normEan); });
+    comecar();
   }).catch(function(e){ mostrarErro('Sem conexão com o app: '+e.message); });
 }
 
@@ -420,8 +431,14 @@ function bipeConferencia(txt, digitado){
   if(!CONF || MODAL_ABERTO) return;
   var cod=normEan(txt);
   var agora=Date.now();
-  if(!digitado && cod===CONF.ultimo && agora-CONF.ultimoEm<1500) return;   // mesma leitura repetida
-  CONF.ultimo=cod; CONF.ultimoEm=agora;
+  if(!digitado){
+    if(agora<CONF.pausa) return;                       // tela de confirmação aberta
+    var visto=CONF.visto[cod]||0;
+    CONF.visto[cod]=agora;
+    // O mesmo código ainda na frente da câmera não conta de novo:
+    // tire o produto da frente da câmera (1,5 s) para bipar a próxima unidade
+    if(agora-visto<1500) return;
+  }
   var cand=CONF.itens.filter(function(it){ return it.eans.indexOf(cod)>=0 || normEan(it.sku)===cod; });
   if(!cand.length){ erroConf('Produto diferente do solicitado','Código lido: '+txt+'. Esse produto não está neste pedido.'); return; }
   var it=cand.filter(function(x){ return x.lidos<x.q; })[0];
@@ -430,6 +447,23 @@ function bipeConferencia(txt, digitado){
   it.lidos++;
   som(true);
   desenharConf();
+  telaOk(it);
+}
+
+function telaOk(it){
+  var t=document.getElementById('okTela');
+  t.innerHTML='';
+  t.appendChild(el('div','big', it.lidos>=it.q ? '✅' : '✔'));
+  t.appendChild(el('div','big', it.lidos+' de '+it.q));
+  t.appendChild(el('div','sku', it.sku));
+  t.appendChild(el('div','desc', it.desc));
+  var falta=CONF.itens.reduce(function(s,x){ return s+Math.max(0,x.q-x.lidos); },0);
+  t.appendChild(el('div','desc', falta ? 'Faltam '+falta+' peça(s) no pedido' : 'Todos os itens conferidos! Toque em Concluir.'));
+  t.style.display='flex';
+  CONF.pausa=Date.now()+1300;
+  clearTimeout(telaOk.tm);
+  telaOk.tm=setTimeout(function(){ t.style.display='none'; },1300);
+  t.onclick=function(){ t.style.display='none'; if(CONF) CONF.pausa=0; };
 }
 
 function pedirQtd(it){
@@ -447,6 +481,7 @@ function pedirQtd(it){
     it.lidos=v;
     if(v<it.q) CONF.erros.push('Faltando '+it.sku+': contado '+v+' de '+it.q);
     desenharConf();
+    telaOk(it);
   };
   setTimeout(function(){ i.focus(); },100);
 }
