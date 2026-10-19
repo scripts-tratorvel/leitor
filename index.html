@@ -60,6 +60,21 @@
   .hist div{padding:10px 4px;border-top:1px solid var(--line);font-size:14px;cursor:pointer}
   a{color:var(--azul)}
   .rodape{text-align:center;font-size:13px;margin:16px 0}
+  select{width:100%;font-size:16px;padding:10px;border:2px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);font-family:inherit;font-weight:700}
+  .btn.verde{background:var(--ok)}
+  .cf{border-top:1px solid var(--line);padding:10px 0;display:flex;gap:10px;align-items:center}
+  .cf .cont{flex:none;font-weight:800;font-size:20px;min-width:64px;text-align:center;border-radius:8px;padding:4px 6px;background:var(--line)}
+  .cf.ok .cont{background:var(--ok);color:#fff}
+  .cf.parcial .cont{background:#e8a400;color:#fff}
+  .cf .inf{flex:1;min-width:0}
+  .cf .sku{font-size:20px}
+  .semean{font-size:12px;color:var(--erro);font-weight:700}
+  #modal{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.6);padding:20px}
+  #modal .caixa{background:var(--card);border-radius:14px;padding:20px;max-width:420px;width:100%;text-align:center;border:5px solid var(--erro)}
+  #modal .caixa.info{border-color:var(--azul)}
+  #modal h2{margin:0 0 8px;font-size:22px}
+  #modal p{margin:0 0 14px;font-size:16px;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -68,6 +83,7 @@
   <div class="sub" id="sub">Expedição Tratorvel Goiânia</div>
 </header>
 <main id="main"></main>
+<div id="modal"><div class="caixa" id="modalCaixa"></div></div>
 
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
@@ -80,6 +96,11 @@ var HIST = [];
 try { HIST = JSON.parse(localStorage.getItem('leitor_hist') || '[]'); } catch (e) {}
 
 var main = document.getElementById('main');
+var NOMES = ['', 'Ana', 'Joel', 'Everton'];   // quem confere (mesma lista do Balanço)
+var QUEM = '';
+try { QUEM = localStorage.getItem('leitor_quem') || ''; } catch (e) {}
+var CONF = null;          // conferência em andamento
+var ULTIMO_R = null;      // último pedido lido
 var leitor = null, ocupado = false, ultimo = '', ultimoEm = 0;
 
 function el(tag, cls, txt){ var e=document.createElement(tag); if(cls) e.className=cls; if(txt!=null) e.textContent=txt; return e; }
@@ -128,7 +149,7 @@ function telaLeitor(){
   btnCam=el('button','btn','📷 Abrir câmera'); btnCam.style.marginTop='10px';
   c.appendChild(btnCam);
   var ln=el('div','linha');
-  inp=el('input'); inp.type='text'; inp.inputMode='numeric'; inp.placeholder='ou digite nº envio / NF'; inp.autocomplete='off';
+  inp=el('input'); inp.type='text'; inp.inputMode='numeric'; inp.placeholder='ou digite envio, NF ou chave'; inp.autocomplete='off';
   var bb=el('button','btn','Buscar');
   ln.appendChild(inp); ln.appendChild(bb); c.appendChild(ln);
   aviso=el('div','aviso'); c.appendChild(aviso);
@@ -137,6 +158,14 @@ function telaLeitor(){
   resBox=el('div'); main.appendChild(resBox);
   histBox=el('div','hist'); main.appendChild(histBox);
   desenharHist();
+
+  var quem=el('div','card');
+  quem.appendChild(el('div','meta','👤 Quem está conferindo (para a conferência dos itens)'));
+  var sq=el('select'); sq.style.marginTop='6px';
+  NOMES.forEach(function(n){ var o=el('option',null,n||'— escolha —'); o.value=n; sq.appendChild(o); });
+  sq.value=NOMES.indexOf(QUEM)>=0?QUEM:'';
+  sq.onchange=function(){ QUEM=sq.value; try{localStorage.setItem('leitor_quem',QUEM);}catch(e){} };
+  quem.appendChild(sq); main.appendChild(quem);
 
   var rod=el('div','rodape');
   var a=el('a',null,'📦 Abrir o app de separação'); a.href=APP; a.target='_blank'; a.rel='noopener';
@@ -153,37 +182,43 @@ function telaLeitor(){
   abrirCamera();
 }
 
-function abrirCamera(){
+var ALVO='leitor';
+function abrirCamera(alvo){
   if(leitor) return;
+  ALVO=alvo||'leitor';
   if(!window.Html5Qrcode){ aviso.textContent='⚠ Não foi possível carregar o leitor. Verifique a internet e recarregue a página.'; return; }
   aviso.textContent='Abrindo a câmera…';
   var fmts=[];
-  try { var F=Html5QrcodeSupportedFormats; fmts=[F.CODE_128,F.QR_CODE,F.CODE_39,F.EAN_13,F.ITF]; } catch(e){}
+  try { var F=Html5QrcodeSupportedFormats; fmts=[F.CODE_128,F.QR_CODE,F.CODE_39,F.EAN_13,F.EAN_8,F.UPC_A,F.ITF]; } catch(e){}
   try {
-    leitor=new Html5Qrcode('leitor', { formatsToSupport: fmts.length?fmts:undefined,
+    leitor=new Html5Qrcode(ALVO, { formatsToSupport: fmts.length?fmts:undefined,
       experimentalFeatures:{ useBarCodeDetectorIfSupported:true }, verbose:false });
   } catch(e){
-    leitor=new Html5Qrcode('leitor');
+    leitor=new Html5Qrcode(ALVO);
   }
   leitor.start({facingMode:'environment'},
     { fps:12, qrbox:function(w,h){ var lw=Math.min(w*0.9,420); return {width:lw, height:Math.min(h*0.6, lw*0.6)}; } },
     function(txt){ lido(txt); }, function(){})
-  .then(function(){ btnCam.textContent='✖ Fechar câmera'; btnCam.className='btn sec'; aviso.textContent='Aponte para o código de barras ou o QR Code da etiqueta.'; })
+  .then(function(){
+    if(CONF){ return; }
+    btnCam.textContent='✖ Fechar câmera'; btnCam.className='btn sec'; aviso.textContent='Aponte para a etiqueta do ML ou o código de barras da nota (DANFE).'; })
   .catch(function(err){
     leitor=null;
     var t = (err && (err.name||'')) + ' ' + (err && err.message || err || '');
-    aviso.textContent='⚠ A câmera não abriu: '+t.trim()+'. Toque em "Abrir câmera" e permita o acesso.';
+    var m='⚠ A câmera não abriu: '+t.trim()+'.';
+    if(CONF){ var a=document.getElementById('confAviso'); if(a) a.textContent=m; } else aviso.textContent=m+' Toque em "Abrir câmera" e permita o acesso.';
   });
 }
 
 function pararCamera(){
   var l=leitor; leitor=null;
-  if(btnCam){ btnCam.textContent='📷 Abrir câmera'; btnCam.className='btn'; }
+  if(btnCam && !CONF){ btnCam.textContent='📷 Abrir câmera'; btnCam.className='btn'; }
   if(l){ try{ l.stop().then(function(){ try{l.clear();}catch(e){} }).catch(function(){}); }catch(e){} }
 }
 
 function lido(txt){
   txt=String(txt||'').trim();
+  if(CONF){ bipeConferencia(txt); return; }
   if(!txt || ocupado) return;
   var agora=Date.now();
   if(txt===ultimo && agora-ultimoEm<8000) return;   // mesma etiqueta ainda na frente da câmera
@@ -227,9 +262,10 @@ function mostrar(r){
   var c=el('div','card res');
   var cab=el('div','cab');
   cab.appendChild(el('b',null,'NF '+(r.nf||'-')));
-  cab.appendChild(el('span',null,[r.pv?'PV '+r.pv:'', r.pack?'Pack '+r.pack:''].filter(Boolean).join(' · ')));
+  cab.appendChild(el('span',null,[r.origem==='vd'?'📦 Vendas':'🛒 Mercado Livre', r.pv?'PV '+r.pv:'', r.pack?'Pack '+r.pack:''].filter(Boolean).join(' · ')));
   c.appendChild(cab);
   c.appendChild(el('div','cli',r.cliente||''));
+  if(r.origem==='vd' && r.status) c.appendChild(el('div','meta','Status na planilha: '+r.status));
   var itens=r.itens||[], tot=0;
   itens.forEach(function(it){ tot+=Number(String(it.q).replace(',','.'))||1; });
   if(itens.length>1 || tot>1) c.appendChild(el('div','multi','⚠ ATENÇÃO: '+itens.length+' produto(s), '+String(tot).replace('.',',')+' peça(s) nesta etiqueta'));
@@ -245,6 +281,12 @@ function mostrar(r){
     c.appendChild(d);
   });
   if(r.obs) c.appendChild(el('div','obs','📝 '+r.obs));
+  ULTIMO_R=r;
+  if(itens.length){
+    var bc=el('button','btn verde','✅ Conferir itens (bipar produtos)'); bc.style.marginTop='12px';
+    bc.onclick=function(){ iniciarConferencia(r); };
+    c.appendChild(bc);
+  }
   c.appendChild(botaoProxima());
   resBox.appendChild(c);
 
@@ -265,6 +307,166 @@ function desenharHist(){
     d.onclick=function(){ buscar(h.envio||h.pack||h.nf); window.scrollTo(0,0); };
     histBox.appendChild(d);
   });
+}
+
+/* ================= CONFERÊNCIA DOS ITENS ================= */
+function som(ok){
+  try{
+    var C=window.AudioContext||window.webkitAudioContext; if(!C) return;
+    var ctx=som.ctx||(som.ctx=new C());
+    var o=ctx.createOscillator(), g=ctx.createGain();
+    o.frequency.value=ok?1200:220; o.type=ok?'sine':'square';
+    g.gain.value=0.2; o.connect(g); g.connect(ctx.destination);
+    o.start(); o.stop(ctx.currentTime+(ok?0.12:0.5));
+  }catch(e){}
+  try{ if(navigator.vibrate) navigator.vibrate(ok?60:[200,100,200]); }catch(e){}
+}
+
+var MODAL_ABERTO=false;
+function modal(titulo, texto, info, extra){
+  var m=document.getElementById('modal'), cx=document.getElementById('modalCaixa');
+  cx.className='caixa'+(info?' info':''); cx.innerHTML='';
+  cx.appendChild(el('h2',null,titulo));
+  if(texto) cx.appendChild(el('p',null,texto));
+  if(extra) cx.appendChild(extra);
+  var ok=el('button','btn','OK'); ok.style.marginTop='6px';
+  ok.onclick=fecharModal; cx.appendChild(ok);
+  m.style.display='flex'; MODAL_ABERTO=true;
+  return ok;
+}
+function fecharModal(){ document.getElementById('modal').style.display='none'; MODAL_ABERTO=false; }
+
+function erroConf(titulo, texto){
+  if(CONF) CONF.erros.push(titulo+(texto?' ('+texto+')':''));
+  som(false);
+  modal('⛔ '+titulo, texto);
+}
+
+function iniciarConferencia(r){
+  if(!QUEM){ modal('👤 Quem está conferindo?','Escolha seu nome no fim da página antes de conferir.',true); return; }
+  pararCamera();
+  var itens=(r.itens||[]).map(function(it){
+    return { sku:String(it.sku||''), desc:it.desc||'', local:it.local||'', kit:it.kit||'',
+             q:Number(String(it.q).replace(',','.'))||1, lidos:0, eans:[] };
+  });
+  resBox.innerHTML='';
+  resBox.appendChild(el('div','card res busca','⏳ Buscando os códigos de barras dos produtos…'));
+  var skus=itens.map(function(i){return i.sku;}).filter(function(v,i,a){return v && a.indexOf(v)===i;});
+  api({acao:'gtins', pin:PIN, skus:skus.join('|')}).then(function(res){
+    if(!res.ok){ mostrarErro(res.erro||'Erro ao buscar os códigos.'); return; }
+    itens.forEach(function(i){ i.eans=(res.r[i.sku]||[]).map(normEan); });
+    CONF={ r:r, itens:itens, erros:[], ultimo:'', ultimoEm:0 };
+    desenharConf();
+    abrirCamera('leitorConf');
+  }).catch(function(e){ mostrarErro('Sem conexão com o app: '+e.message); });
+}
+
+function normEan(c){ c=String(c||'').trim(); return /^\d+$/.test(c) ? c.replace(/^0+/,'') : c.toUpperCase(); }
+
+function desenharConf(){
+  var r=CONF.r;
+  // A moldura (com a câmera) é criada uma vez só; depois só a lista de itens é redesenhada
+  if(!CONF.lista || !document.body.contains(CONF.lista)){
+    resBox.innerHTML='';
+    var c=el('div','card res busca');
+    var cab=el('div','cab');
+    cab.appendChild(el('b',null,'🔎 Conferência · NF '+(r.nf||'-')));
+    cab.appendChild(el('span',null,[r.origem==='vd'?'Vendas':'Mercado Livre', r.pv?'PV '+r.pv:''].filter(Boolean).join(' · ')));
+    c.appendChild(cab);
+    c.appendChild(el('div','cli',r.cliente||''));
+    var lt=el('div'); lt.id='leitorConf'; lt.style.marginTop='10px'; lt.style.borderRadius='10px'; lt.style.overflow='hidden'; lt.style.background='#000';
+    c.appendChild(lt);
+    var bCam=el('button','btn sec','📷 Reabrir câmera'); bCam.style.marginTop='8px';
+    bCam.onclick=function(){ if(!leitor) abrirCamera('leitorConf'); };
+    c.appendChild(bCam);
+    var av=el('div','aviso','Bipe o código de barras de cada produto.'); av.id='confAviso'; c.appendChild(av);
+    var ln=el('div','linha');
+    var inp=el('input'); inp.type='text'; inp.placeholder='ou digite EAN ou SKU'; inp.autocomplete='off';
+    var bb=el('button','btn','OK');
+    bb.onclick=function(){ var v=inp.value.trim(); if(v){ inp.value=''; bipeConferencia(v, true); } };
+    inp.onkeydown=function(e){ if(e.key==='Enter') bb.click(); };
+    ln.appendChild(inp); ln.appendChild(bb); c.appendChild(ln);
+    CONF.lista=el('div'); c.appendChild(CONF.lista);
+    resBox.appendChild(c);
+  }
+  var L=CONF.lista; L.innerHTML='';
+  var tudo=true;
+  CONF.itens.forEach(function(it){
+    var st = it.lidos>=it.q ? 'ok' : (it.lidos>0 ? 'parcial' : '');
+    if(it.lidos<it.q) tudo=false;
+    var d=el('div','cf '+st);
+    d.appendChild(el('div','cont',(it.lidos)+'/'+(it.q)));
+    var inf=el('div','inf');
+    inf.appendChild(el('div','sku',it.sku));
+    inf.appendChild(el('div','desc',it.desc));
+    if(it.q>5) inf.appendChild(el('div','meta','Mais de 5 unidades: bipe 1 e digite a quantidade'));
+    if(!it.eans.length) inf.appendChild(el('div','semean','Sem EAN no Bling: digite o SKU'));
+    d.appendChild(inf);
+    L.appendChild(d);
+  });
+  var bOk=el('button','btn verde', tudo ? '✅ Concluir conferência' : 'Faltam itens para concluir');
+  bOk.style.marginTop='12px'; bOk.disabled=!tudo;
+  bOk.onclick=function(){ concluirConf(bOk); };
+  L.appendChild(bOk);
+  var bCa=el('button','btn sec','Cancelar conferência'); bCa.style.marginTop='8px';
+  bCa.onclick=function(){ if(confirm('Cancelar esta conferência? Nada será registrado.')){ pararCamera(); CONF=null; mostrar(ULTIMO_R); } };
+  L.appendChild(bCa);
+}
+
+function bipeConferencia(txt, digitado){
+  if(!CONF || MODAL_ABERTO) return;
+  var cod=normEan(txt);
+  var agora=Date.now();
+  if(!digitado && cod===CONF.ultimo && agora-CONF.ultimoEm<1500) return;   // mesma leitura repetida
+  CONF.ultimo=cod; CONF.ultimoEm=agora;
+  var cand=CONF.itens.filter(function(it){ return it.eans.indexOf(cod)>=0 || normEan(it.sku)===cod; });
+  if(!cand.length){ erroConf('Produto diferente do solicitado','Código lido: '+txt+'. Esse produto não está neste pedido.'); return; }
+  var it=cand.filter(function(x){ return x.lidos<x.q; })[0];
+  if(!it){ erroConf('Quantidade a mais', cand[0].sku+': o pedido tem só '+cand[0].q+' unidade(s), e todas já foram conferidas.'); return; }
+  if(it.q>5 && it.lidos===0){ pedirQtd(it); return; }
+  it.lidos++;
+  som(true);
+  desenharConf();
+}
+
+function pedirQtd(it){
+  som(true);
+  var box=el('div');
+  var i=el('input'); i.type='tel'; i.inputMode='numeric'; i.placeholder='quantidade'; i.style.margin='4px 0 10px';
+  box.appendChild(i);
+  var ok=modal('🔢 '+it.sku, 'Quantas unidades estão na bancada? O pedido tem '+it.q+'.', true, box);
+  ok.textContent='Confirmar';
+  ok.onclick=function(){
+    var v=Number(String(i.value).replace(',','.'));
+    if(!(v>0)){ i.focus(); return; }
+    fecharModal();
+    if(v>it.q){ erroConf('Quantidade a mais', it.sku+': contado '+v+', o pedido tem '+it.q+'.'); return; }
+    it.lidos=v;
+    if(v<it.q) CONF.erros.push('Faltando '+it.sku+': contado '+v+' de '+it.q);
+    desenharConf();
+  };
+  setTimeout(function(){ i.focus(); },100);
+}
+
+function concluirConf(b){
+  b.disabled=true; b.textContent='Registrando…';
+  pararCamera();
+  var r=CONF.r;
+  var resumo=CONF.itens.map(function(it){ return it.lidos+'/'+it.q+' '+it.sku; }).join(', ');
+  api({acao:'conferido', pin:PIN, origem:r.origem||'ml', pv:r.pv||'', nf:r.nf||'', envio:r.envio||'',
+       cliente:r.cliente||'', quem:QUEM, itens:resumo, erros:CONF.erros.join(' / ')}).then(function(res){
+    if(!res.ok){ b.disabled=false; b.textContent='✅ Concluir conferência'; erroConf('Não foi possível registrar', res.erro||''); return; }
+    CONF=null;
+    resBox.innerHTML='';
+    var c=el('div','card res');
+    c.appendChild(el('b',null,'✅ Conferência registrada'));
+    c.appendChild(el('div','cli',[r.nf?'NF '+r.nf:'', r.pv?'PV '+r.pv:'', r.cliente||''].filter(Boolean).join(' · ')));
+    if(res.r && res.r.status) c.appendChild(el('div','meta','Status na planilha: '+res.r.status));
+    c.appendChild(el('div','meta','Pode embalar e etiquetar. 📦'));
+    c.appendChild(botaoProxima());
+    resBox.appendChild(c);
+    som(true);
+  }).catch(function(e){ b.disabled=false; b.textContent='✅ Concluir conferência'; erroConf('Sem conexão com o app', e.message); });
 }
 
 document.addEventListener('visibilitychange', function(){ if(document.hidden) pararCamera(); });
