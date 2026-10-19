@@ -196,12 +196,15 @@ function abrirCamera(alvo){
   } catch(e){
     leitor=new Html5Qrcode(ALVO);
   }
+  // Câmera em alta resolução e área de leitura larga: o código do DANFE (chave de 44 números) é comprido e fino
   leitor.start({facingMode:'environment'},
-    { fps:12, qrbox:function(w,h){ var lw=Math.min(w*0.9,420); return {width:lw, height:Math.min(h*0.6, lw*0.6)}; } },
+    { fps:15,
+      videoConstraints:{ facingMode:'environment', width:{ideal:1920}, height:{ideal:1080}, advanced:[{focusMode:'continuous'}] },
+      qrbox:function(w,h){ return {width:Math.floor(w*0.96), height:Math.floor(Math.min(h*0.5, w*0.5))}; } },
     function(txt){ lido(txt); }, function(){})
   .then(function(){
     if(CONF){ return; }
-    btnCam.textContent='✖ Fechar câmera'; btnCam.className='btn sec'; aviso.textContent='Aponte para a etiqueta do ML ou o código de barras da nota (DANFE).'; })
+    btnCam.textContent='✖ Fechar câmera'; btnCam.className='btn sec'; aviso.textContent='Aponte para a etiqueta do ML ou o código de barras da nota (DANFE). No DANFE, deixe o código deitado, ocupando a largura da tela.'; })
   .catch(function(err){
     leitor=null;
     var t = (err && (err.name||'')) + ' ' + (err && err.message || err || '');
