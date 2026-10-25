@@ -89,7 +89,7 @@
 <body>
 <header>
   <h1>🏷️ Leitor de etiquetas ML</h1>
-  <div class="sub" id="sub">Expedição Tratorvel Goiânia · v23/10b</div>
+  <div class="sub" id="sub">Expedição Tratorvel Goiânia · v25/10</div>
   <select id="modo" aria-label="O que você vai fazer">
     <option value="et">🏷️ Etiqueta / conferência de pedido</option>
     <option value="bl">📋 Balanço (contagem de estoque)</option>
@@ -209,7 +209,8 @@ function telaLeitor(){
   btnCam.onclick=function(){ if(leitor) pararCamera(); else abrirCamera(); };
   bb.onclick=function(){ var v=inp.value.trim(); if(v) buscar(v); };
   inp.onkeydown=function(e){ if(e.key==='Enter') bb.click(); };
-  abrirCamera();
+  // 25/10/2026: a página abre com a câmera fechada; ela só abre ao tocar no botão
+  aviso.textContent='Toque em "Abrir câmera" para ler a etiqueta.';
 }
 
 var ALVO='leitor';
@@ -554,7 +555,7 @@ function telaBalanco(){
   var sq=el('select'); sq.id='balQuem'; sq.style.marginTop='6px';
   NOMES.forEach(function(n){ var o=el('option',null,n||'— escolha —'); o.value=n; sq.appendChild(o); });
   sq.value=NOMES.indexOf(QUEM)>=0?QUEM:'';
-  sq.onchange=function(){ QUEM=sq.value; try{localStorage.setItem('leitor_quem',QUEM);}catch(e){} if(QUEM && !leitor) abrirCamera(); };
+  sq.onchange=function(){ QUEM=sq.value; try{localStorage.setItem('leitor_quem',QUEM);}catch(e){} };
   q.appendChild(sq); main.appendChild(q);
 
   var c=el('div','card');
@@ -585,7 +586,8 @@ function telaBalanco(){
   bb.onclick=function(){ var v=inp.value.trim(); if(v){ pararCamera(); buscarBalanco(v); } };
   inp.onkeydown=function(e){ if(e.key==='Enter') bb.click(); };
   carregarPendentesBal();
-  if(QUEM) abrirCamera(); else aviso.textContent='Escolha quem está contando para abrir a câmera.';
+  // 25/10/2026: começa com a câmera fechada
+  aviso.textContent = QUEM ? 'Toque em "Abrir câmera" para ler o EAN do produto.' : 'Escolha quem está contando e toque em "Abrir câmera".';
 }
 
 function checarQuem(){
