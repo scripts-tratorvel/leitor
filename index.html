@@ -79,12 +79,21 @@
   #okTela .desc{color:#eafff1;font-size:16px;margin-top:6px}
   #modal h2{margin:0 0 8px;font-size:22px}
   #modal p{margin:0 0 14px;font-size:16px;overflow-wrap:anywhere}
+  header select{margin-top:8px;border:2px solid #2d3277;color:#2d3277;background:#fff;font-size:17px;font-weight:800}
+  .botoes{display:flex;gap:8px;margin-top:12px}
+  .botoes .btn{flex:1}
+  .pend{border-top:1px solid var(--line);padding:10px 0}
+  .pend .btn{padding:10px;font-size:14px;margin-top:6px}
 </style>
 </head>
 <body>
 <header>
   <h1>🏷️ Leitor de etiquetas ML</h1>
-  <div class="sub" id="sub">Expedição Tratorvel Goiânia</div>
+  <div class="sub" id="sub">Expedição Tratorvel Goiânia · v23/10b</div>
+  <select id="modo" aria-label="O que você vai fazer">
+    <option value="et">🏷️ Etiqueta / conferência de pedido</option>
+    <option value="bl">📋 Balanço (contagem de estoque)</option>
+  </select>
 </header>
 <main id="main"></main>
 <div id="modal"><div class="caixa" id="modalCaixa"></div></div>
@@ -107,6 +116,21 @@ try { QUEM = localStorage.getItem('leitor_quem') || ''; } catch (e) {}
 var CONF = null;          // conferência em andamento
 var ULTIMO_R = null;      // último pedido lido
 var leitor = null, ocupado = false, ultimo = '', ultimoEm = 0;
+
+// Modo da página: 'et' = etiqueta/conferência, 'bl' = balanço (23/10/2026)
+var MODO = 'et';
+try { MODO = localStorage.getItem('leitor_modo') || 'et'; } catch (e) {}
+if (/[?&]modo=bl/.test(location.search)) MODO = 'bl';
+if (/[?&]modo=et/.test(location.search)) MODO = 'et';
+var selModo = document.getElementById('modo');
+selModo.value = MODO;
+selModo.onchange = function(){
+  MODO = selModo.value;
+  try { localStorage.setItem('leitor_modo', MODO); } catch (e) {}
+  pararCamera(); CONF = null; fecharModal();
+  window.scrollTo(0,0);
+  if (PIN) telaLeitor(); else telaPin();
+};
 
 function el(tag, cls, txt){ var e=document.createElement(tag); if(cls) e.className=cls; if(txt!=null) e.textContent=txt; return e; }
 
@@ -148,6 +172,7 @@ function telaPin(msg){
 var aviso, resBox, histBox, btnCam, inp;
 
 function telaLeitor(){
+  if(MODO==='bl'){ telaBalanco(); return; }
   main.innerHTML='';
   var c=el('div','card');
   var lt=el('div'); lt.id='leitor'; c.appendChild(lt);
@@ -209,7 +234,9 @@ function abrirCamera(alvo){
     function(txt){ lido(txt); }, function(){})
   .then(function(){
     if(CONF){ return; }
-    btnCam.textContent='✖ Fechar câmera'; btnCam.className='btn sec'; aviso.textContent='Aponte para a etiqueta do ML ou o código de barras da nota (DANFE). No DANFE, deixe o código deitado, ocupando a largura da tela.'; })
+    btnCam.textContent='✖ Fechar câmera'; btnCam.className='btn sec';
+    if(MODO==='bl'){ aviso.textContent='Aponte para o código de barras (EAN) do produto.'; return; }
+    aviso.textContent='Aponte para a etiqueta do ML ou o código de barras da nota (DANFE). No DANFE, deixe o código deitado, ocupando a largura da tela.'; })
   .catch(function(err){
     leitor=null;
     var t = (err && (err.name||'')) + ' ' + (err && err.message || err || '');
@@ -228,6 +255,13 @@ function lido(txt){
   txt=String(txt||'').trim();
   if(CONF){ bipeConferencia(txt); return; }
   if(!txt || ocupado) return;
+  if(MODO==='bl'){
+    ultimo=txt; ultimoEm=Date.now();
+    try{ if(navigator.vibrate) navigator.vibrate(80); }catch(e){}
+    pararCamera();
+    buscarBalanco(txt);
+    return;
+  }
   var agora=Date.now();
   if(txt===ultimo && agora-ultimoEm<8000) return;   // mesma etiqueta ainda na frente da câmera
   ultimo=txt; ultimoEm=agora;
@@ -505,6 +539,200 @@ function concluirConf(b){
     resBox.appendChild(c);
     som(true);
   }).catch(function(e){ b.disabled=false; b.textContent='✅ Concluir conferência'; erroConf('Sem conexão com o app', e.message); });
+}
+
+
+/* ================= BALANÇO (23/10/2026) =================
+ * Mesma função da aba Balanço do app de separação, mas aqui a câmera ao vivo funciona.
+ * Grava na mesma aba BALANCO da planilha. */
+var balPend;
+
+function telaBalanco(){
+  main.innerHTML='';
+  var q=el('div','card');
+  q.appendChild(el('div','meta','👤 Quem está contando'));
+  var sq=el('select'); sq.id='balQuem'; sq.style.marginTop='6px';
+  NOMES.forEach(function(n){ var o=el('option',null,n||'— escolha —'); o.value=n; sq.appendChild(o); });
+  sq.value=NOMES.indexOf(QUEM)>=0?QUEM:'';
+  sq.onchange=function(){ QUEM=sq.value; try{localStorage.setItem('leitor_quem',QUEM);}catch(e){} if(QUEM && !leitor) abrirCamera(); };
+  q.appendChild(sq); main.appendChild(q);
+
+  var c=el('div','card');
+  c.appendChild(el('div','meta','Pegue o item e leia o código de barras (EAN)'));
+  var lt=el('div'); lt.id='leitor'; lt.style.marginTop='8px'; c.appendChild(lt);
+  btnCam=el('button','btn','📷 Abrir câmera'); btnCam.style.marginTop='10px';
+  c.appendChild(btnCam);
+  var ln=el('div','linha');
+  inp=el('input'); inp.type='text'; inp.placeholder='ou digite o EAN ou o SKU'; inp.autocomplete='off';
+  var bb=el('button','btn','Buscar');
+  ln.appendChild(inp); ln.appendChild(bb); c.appendChild(ln);
+  aviso=el('div','aviso'); c.appendChild(aviso);
+  main.appendChild(c);
+
+  resBox=el('div'); main.appendChild(resBox);
+  balPend=el('div'); main.appendChild(balPend);
+
+  var rod=el('div','rodape');
+  var a=el('a',null,'📦 Abrir o app de separação'); a.href=APP; a.target='_blank'; a.rel='noopener';
+  rod.appendChild(a);
+  rod.appendChild(el('br'));
+  var sair=el('a',null,'Trocar código de acesso'); sair.href='#';
+  sair.onclick=function(e){ e.preventDefault(); try{localStorage.removeItem('leitor_pin');}catch(_){} PIN=''; telaPin(); };
+  rod.appendChild(sair);
+  main.appendChild(rod);
+
+  btnCam.onclick=function(){ if(leitor) pararCamera(); else if(checarQuem()) abrirCamera(); };
+  bb.onclick=function(){ var v=inp.value.trim(); if(v){ pararCamera(); buscarBalanco(v); } };
+  inp.onkeydown=function(e){ if(e.key==='Enter') bb.click(); };
+  carregarPendentesBal();
+  if(QUEM) abrirCamera(); else aviso.textContent='Escolha quem está contando para abrir a câmera.';
+}
+
+function checarQuem(){
+  if(QUEM) return true;
+  aviso.textContent='⚠ Escolha quem está contando antes de começar.';
+  var s=document.getElementById('balQuem'); if(s) s.focus();
+  return false;
+}
+
+function botaoProximoItem(){
+  var b=el('button','btn','📷 Ler próximo item'); b.style.marginTop='12px';
+  b.onclick=function(){ resBox.innerHTML=''; ultimo=''; window.scrollTo(0,0); if(checarQuem()) abrirCamera(); };
+  return b;
+}
+
+function erroBal(msg){
+  resBox.innerHTML='';
+  var c=el('div','card res erro','⚠ '+msg);
+  c.appendChild(el('br')); c.appendChild(botaoProximoItem());
+  resBox.appendChild(c);
+  try{ if(navigator.vibrate) navigator.vibrate([60,60,60]); }catch(e){}
+}
+
+function buscarBalanco(txt){
+  if(!checarQuem()) return;
+  ocupado=true;
+  resBox.innerHTML='';
+  resBox.appendChild(el('div','card res busca','⏳ Buscando '+txt+' no Bling…'));
+  api({acao:'balbuscar', pin:PIN, codigo:txt}).then(function(r){
+    ocupado=false;
+    if(!r.ok){
+      if(String(r.erro||'').indexOf('PIN')>=0){ try{localStorage.removeItem('leitor_pin');}catch(_){} telaPin('Código de acesso incorreto.'); return; }
+      erroBal(r.erro||'Erro desconhecido.'); return;
+    }
+    inp.value='';
+    mostrarBalanco(r.r);
+  }).catch(function(e){ ocupado=false; erroBal('Sem conexão com o app: '+e.message); });
+}
+
+function mostrarBalanco(p){
+  try{ if(navigator.vibrate) navigator.vibrate(120); }catch(e){}
+  resBox.innerHTML='';
+  var c=el('div','card res busca');
+  var cab=el('div','cab');
+  cab.appendChild(el('b',null,p.sku||'(sem SKU)'));
+  cab.appendChild(el('span',null,p.gtin?'EAN '+p.gtin:''));
+  c.appendChild(cab);
+  c.appendChild(el('div','desc',p.nome||''));
+  c.appendChild(el('div','loc'+(p.local?'':' sem'),'📍 Sistema: '+(p.local||'sem localização')));
+  var g=el('div','grande'); g.style.marginTop='10px';
+  g.appendChild(el('span','qtd',String(p.fisico)));
+  g.appendChild(el('span',null,'no estoque do sistema'));
+  c.appendChild(g);
+  if(p.reservado>0) c.appendChild(el('div','meta','(inclui '+p.reservado+' reservado(s) para pedidos ainda sem nota)'));
+  if(p.depositos>1) c.appendChild(el('div','meta','Saldo distribuído em '+p.depositos+' depósitos no Bling'));
+  if(p.ultima) c.appendChild(el('div','meta','ℹ Já contado em '+p.ultima));
+
+  var bs=el('div','botoes');
+  var ok=el('button','btn verde','✅ Confere ('+p.fisico+')');
+  var dif=el('button','btn sec','✏️ Alterar');
+  bs.appendChild(ok); bs.appendChild(dif); c.appendChild(bs);
+  var area=el('div'); c.appendChild(area);
+  ok.onclick=function(){ salvarBal(p,p.fisico,'',c); };
+  dif.onclick=function(){
+    area.innerHTML='';
+    var f=el('div'); f.style.marginTop='12px';
+    f.appendChild(el('div','meta','🔢 Quantidade contada'));
+    var iq=el('input'); iq.type='tel'; iq.inputMode='decimal'; iq.value=String(p.fisico); iq.style.marginTop='4px';
+    f.appendChild(iq);
+    f.appendChild(el('div','meta','📍 Localização correta'));
+    var il=el('input'); il.type='text'; il.value=p.local||''; il.placeholder='ex.: PA 07 C'; il.style.textTransform='uppercase'; il.style.marginTop='4px';
+    f.appendChild(il);
+    var sv=el('button','btn','💾 Salvar alteração'); sv.style.marginTop='12px';
+    f.appendChild(sv);
+    area.appendChild(f);
+    iq.focus(); iq.select();
+    sv.onclick=function(){
+      var v=iq.value.trim().replace(',','.');
+      if(v==='' || isNaN(Number(v))){ iq.focus(); return; }
+      var nl=il.value.trim().toUpperCase();
+      var mudouLocal = nl && nl.replace(/\s/g,'')!==(p.local||'').replace(/\s/g,'').toUpperCase();
+      salvarBal(p, Number(v), mudouLocal?nl:'', c);
+    };
+  };
+  resBox.appendChild(c);
+}
+
+function salvarBal(p, contado, novoLocal, card){
+  Array.prototype.forEach.call(card.querySelectorAll('button'),function(b){ b.disabled=true; });
+  var dados={id:p.id, sku:p.sku, nome:p.nome, gtin:p.gtin, local:p.local, fisico:p.fisico,
+             contado:contado, novoLocal:novoLocal, prateleira:'', quem:QUEM};
+  api({acao:'balregistrar', pin:PIN, dados:JSON.stringify(dados)}).then(function(res){
+    if(!res.ok){
+      Array.prototype.forEach.call(card.querySelectorAll('button'),function(b){ b.disabled=false; });
+      modal('⛔ Não foi possível salvar', res.erro||''); return;
+    }
+    var r=res.r;
+    resBox.innerHTML='';
+    var d=el('div','card res'+(r.situacao==='OK'?'':' erro'));
+    d.appendChild(el('b',null,(r.situacao==='OK'?'✅ Conferido: ':'📝 Alteração registrada: ')+p.sku));
+    if(contado!==p.fisico) d.appendChild(el('div','meta','🔢 Quantidade: sistema '+p.fisico+' → contado '+contado+' (diferença '+(contado-p.fisico>0?'+':'')+(contado-p.fisico)+')'));
+    if(novoLocal) d.appendChild(el('div','meta','📍 Localização: '+(p.local||'sem')+' → '+novoLocal));
+    if(r.situacao!=='OK') d.appendChild(el('div','meta','Foi para a lista de pendentes de ajuste.'));
+    if(r.hoje) d.appendChild(el('div','meta','Hoje: '+r.hoje.ok+' conferido(s) · '+r.hoje.pend+' divergência(s)'));
+    d.appendChild(botaoProximoItem());
+    resBox.appendChild(d);
+    try{ if(navigator.vibrate) navigator.vibrate(150); }catch(e){}
+    carregarPendentesBal();
+  }).catch(function(e){
+    Array.prototype.forEach.call(card.querySelectorAll('button'),function(b){ b.disabled=false; });
+    modal('⛔ Sem conexão com o app', e.message);
+  });
+}
+
+function carregarPendentesBal(){
+  if(!balPend) return;
+  api({acao:'balpendentes', pin:PIN}).then(function(res){
+    if(!res.ok || !document.body.contains(balPend)) return;
+    var lista=res.r||[];
+    balPend.innerHTML='';
+    balPend.appendChild(el('div','sec','⏳ Pendentes de ajuste no Bling ('+lista.length+')'));
+    var c=el('div','card');
+    if(!lista.length){ c.appendChild(el('div','meta','Nenhuma divergência pendente.')); balPend.appendChild(c); return; }
+    lista.forEach(function(it, k){
+      var d=el('div','pend'); if(k===0) d.style.borderTop='0';
+      var g=el('div','grande');
+      var s=el('span','sku',it.sku); s.style.fontSize='18px'; g.appendChild(s);
+      g.appendChild(el('span','meta','📍 '+(it.local||'-')));
+      d.appendChild(g);
+      d.appendChild(el('div','desc',it.nome));
+      var dfs=it.contado-it.fisico;
+      if(dfs!==0) d.appendChild(el('div',null,'🔢 Quantidade: sistema '+it.fisico+' → contado '+it.contado+'  ('+(dfs>0?'+':'')+dfs+')'));
+      if(it.novoLocal) d.appendChild(el('div',null,'📍 Localização: '+(it.local||'sem')+' → '+it.novoLocal));
+      d.appendChild(el('div','meta',it.quando+' · '+it.quem));
+      var b=el('button','btn','✔ Já ajustei no Bling');
+      b.onclick=function(){
+        b.disabled=true;
+        api({acao:'balajustado', pin:PIN, linha:it.linha}).then(function(r){
+          if(!r.ok){ b.disabled=false; modal('⛔ Não foi possível marcar', r.erro||''); return; }
+          carregarPendentesBal();
+        }).catch(function(e){ b.disabled=false; modal('⛔ Sem conexão com o app', e.message); });
+      };
+      d.appendChild(b);
+      c.appendChild(d);
+    });
+    balPend.appendChild(c);
+  }).catch(function(){});
 }
 
 document.addEventListener('visibilitychange', function(){ if(document.hidden) pararCamera(); });
